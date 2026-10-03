@@ -11,6 +11,9 @@ $signer = if ($env:SIGNTOOL_EXE) { $env:SIGNTOOL_EXE } elseif ($sdkBin) { Join-P
 $package = Join-Path $PSScriptRoot 'Yizuka.CloudFiles.msix'
 $certificate = $env:YIZUKA_SIGNING_THUMBPRINT
 if (!$certificate) { throw 'Set YIZUKA_SIGNING_THUMBPRINT to a code-signing certificate in your user store.' }
+$signingCert = Get-ChildItem Cert:\CurrentUser\My | Where-Object Thumbprint -EQ $certificate | Select-Object -First 1
+if (!$signingCert -or !$signingCert.HasPrivateKey) { throw 'The signing certificate and private key must be in Cert:\CurrentUser\My.' }
+Export-Certificate -Cert $signingCert -FilePath (Join-Path $PSScriptRoot 'Yizuka.CloudFiles.Test.cer') -Force | Out-Null
 $output = Join-Path $workspace 'outputs\小云盘\YizukaCloudSetup.exe'
 
 & $dotnet publish (Join-Path $workspace 'work\yizuka-cfapi\yizuka-cfapi.csproj') -c Release -r win-x64 --self-contained true '-p:PublishSingleFile=true' '-p:IncludeNativeLibrariesForSelfExtract=true' -o (Join-Path $workspace 'work\yizuka-cfapi\release-publish') -v quiet
