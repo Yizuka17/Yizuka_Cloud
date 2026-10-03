@@ -22,7 +22,7 @@ Copy-Item -LiteralPath (Join-Path $workspace 'work\yizuka-cfapi\release-publish\
 
 $thumbnailSource = Join-Path $workspace 'work\yizuka-thumbnail-handler\ThumbnailHandler.cs'
 $thumbnailOutput = Join-Path $sdk 'YizukaCloud.Thumbnail.exe'
-& $csc /nologo /target:exe "/out:$thumbnailOutput" /define:YIZUKA_RELEASE /reference:System.Drawing.dll /reference:System.Windows.Forms.dll $thumbnailSource
+& $csc /nologo /target:winexe "/out:$thumbnailOutput" /define:YIZUKA_RELEASE /reference:System.Drawing.dll /reference:System.Windows.Forms.dll $thumbnailSource
 if ($LASTEXITCODE -ne 0) { throw 'Thumbnail provider build failed.' }
 
 & $packager pack /d $sdk /p $package /o | Out-Null
