@@ -17,7 +17,7 @@ if ($signingCert.NotAfter -lt (Get-Date).AddYears(9)) { throw 'The release signi
 Export-Certificate -Cert $signingCert -FilePath (Join-Path $PSScriptRoot 'Yizuka.CloudFiles.cer') -Force | Out-Null
 $output = Join-Path $workspace 'outputs\小云盘\YizukaCloudSetup.exe'
 
-& $dotnet publish (Join-Path $workspace 'work\yizuka-cfapi\yizuka-cfapi.csproj') -c Release -r win-x64 --self-contained true '-p:PublishSingleFile=true' '-p:IncludeNativeLibrariesForSelfExtract=true' -o (Join-Path $workspace 'work\yizuka-cfapi\release-publish') -v quiet
+& $dotnet publish (Join-Path $workspace 'work\yizuka-cfapi\yizuka-cfapi.csproj') -c Release -r win-x64 --self-contained true '-p:ReleaseChannel=Production' '-p:PublishSingleFile=true' '-p:IncludeNativeLibrariesForSelfExtract=true' -o (Join-Path $workspace 'work\yizuka-cfapi\release-publish') -v quiet
 if ($LASTEXITCODE -ne 0) { throw 'Cloud Files client publish failed.' }
 Copy-Item -LiteralPath (Join-Path $workspace 'work\yizuka-cfapi\release-publish\yizuka-cfapi.exe') -Destination (Join-Path $sdk 'Yizuka.CloudFiles.exe') -Force
 

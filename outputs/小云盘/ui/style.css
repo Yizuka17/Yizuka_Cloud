@@ -16,5 +16,8 @@
 .danger-button{background:#b4232f;color:white;border-color:#9f1f29}
 .danger-button:hover{background:#9f1f29}
 .grid .file-actions{flex-wrap:wrap}
+.grid .file-row,.grid .file-name{min-width:0;max-width:100%}
+.grid .file-row{overflow:hidden}
+.grid .file-label{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;white-space:normal;overflow:hidden;overflow-wrap:anywhere;word-break:break-word;text-align:center;line-height:1.4;max-width:100%;min-height:2.8em}
 @media(max-width:1000px){.table-head,.file-row{grid-template-columns:minmax(120px,1fr) 72px 186px}}
 @media(max-width:650px){.table-head,.file-row{grid-template-columns:minmax(90px,1fr) auto;gap:6px}.file-row .file-size,.table-head span:nth-child(3){display:none}.file-name{gap:8px}.file-label{font-size:12px}.file-actions a,.file-actions button{font-size:11px;padding:6px 5px}.grid .file-actions{width:100%;justify-content:center}}
