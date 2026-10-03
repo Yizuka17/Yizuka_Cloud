@@ -1,0 +1,28 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <ApplicationIcon>..\yizuka-brand\YizukaCloud.ico</ApplicationIcon>
+    <AssemblyName>YizukaCloudFilesSetup</AssemblyName>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(ReleaseChannel)' == 'Production'">
+    <DefineConstants>$(DefineConstants);YIZUKA_RELEASE</DefineConstants>
+    <AssemblyName>YizukaCloudSetup</AssemblyName>
+  </PropertyGroup>
+  <ItemGroup Condition="'$(ReleaseChannel)' != 'Production'">
+    <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="10.0.12" />
+    <EmbeddedResource Include="..\yizuka-msix\Yizuka.CloudFiles.Test.msix" LogicalName="Yizuka.CloudFiles.Test.msix" />
+    <EmbeddedResource Include="..\yizuka-msix\Yizuka.CloudFiles.Test.cer" LogicalName="Yizuka.CloudFiles.Test.cer" />
+  </ItemGroup>
+  <ItemGroup Condition="'$(ReleaseChannel)' == 'Production'">
+    <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="10.0.12" />
+    <EmbeddedResource Include="..\yizuka-msix\Yizuka.CloudFiles.msix" LogicalName="Yizuka.CloudFiles.msix" />
+    <EmbeddedResource Include="..\yizuka-msix\Yizuka.CloudFiles.Test.cer" LogicalName="Yizuka.CloudFiles.Test.cer" />
+  </ItemGroup>
+  <ItemGroup>
+    <Compile Include="..\yizuka-cfapi\CloudRootSafety.cs" Link="CloudRootSafety.cs" />
+  </ItemGroup>
+</Project>

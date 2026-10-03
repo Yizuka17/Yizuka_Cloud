@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Package
+  xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
+  xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
+  xmlns:desktop="http://schemas.microsoft.com/appx/manifest/desktop/windows10"
+  xmlns:desktop3="http://schemas.microsoft.com/appx/manifest/desktop/windows10/3"
+  xmlns:com="http://schemas.microsoft.com/appx/manifest/com/windows10"
+  xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"
+  IgnorableNamespaces="uap desktop desktop3 com rescap">
+  <Identity Name="Yizuka.CloudFiles" Publisher="CN=Yizuka Cloud Development" Version="1.0.6.0" ProcessorArchitecture="x64" />
+  <Properties>
+    <DisplayName>Yizuka Cloud</DisplayName>
+    <PublisherDisplayName>Yizuka Cloud</PublisherDisplayName>
+    <Logo>Assets\Logo44.png</Logo>
+  </Properties>
+  <Dependencies>
+    <TargetDeviceFamily Name="Windows.Desktop" MinVersion="10.0.19041.0" MaxVersionTested="10.0.19045.0" />
+  </Dependencies>
+  <Resources><Resource Language="zh-CN" /></Resources>
+  <Applications>
+    <Application Id="App" Executable="Yizuka.CloudFiles.exe" EntryPoint="Windows.FullTrustApplication">
+      <uap:VisualElements DisplayName="Yizuka Cloud" Description="Yizuka Cloud on-demand files" BackgroundColor="transparent" Square150x150Logo="Assets\Logo150.png" Square44x44Logo="Assets\Logo44.png" />
+      <Extensions>
+        <desktop:Extension Category="windows.startupTask" Executable="Yizuka.CloudFiles.exe" EntryPoint="Windows.FullTrustApplication">
+          <desktop:StartupTask TaskId="YizukaCloudStartup" Enabled="true" DisplayName="Yizuka Cloud" />
+        </desktop:Extension>
+        <desktop3:Extension Category="windows.cloudFiles">
+          <desktop3:CloudFiles>
+            <desktop3:CustomStateHandler Clsid="72B24656-0204-4697-84B9-DC9F6C94DC90" />
+            <desktop3:ThumbnailProviderHandler Clsid="8EE88A02-7A44-43D2-A88A-662D66142595" />
+            <desktop3:ExtendedPropertyHandler Clsid="72B24656-0204-4697-84B9-DC9F6C94DC90" />
+            <desktop3:BannersHandler Clsid="72B24656-0204-4697-84B9-DC9F6C94DC90" />
+            <desktop3:CloudFilesContextMenus />
+          </desktop3:CloudFiles>
+        </desktop3:Extension>
+        <com:Extension Category="windows.comServer">
+          <com:ComServer>
+            <com:ExeServer DisplayName="Yizuka Cloud Thumbnail Handler" Executable="YizukaCloud.Thumbnail.exe">
+              <com:Class Id="8EE88A02-7A44-43D2-A88A-662D66142595" />
+              <com:Class Id="72B24656-0204-4697-84B9-DC9F6C94DC90" />
+            </com:ExeServer>
+          </com:ComServer>
+        </com:Extension>
+      </Extensions>
+    </Application>
+  </Applications>
+  <Capabilities>
+    <Capability Name="internetClient" />
+    <rescap:Capability Name="runFullTrust" />
+  </Capabilities>
+</Package>
