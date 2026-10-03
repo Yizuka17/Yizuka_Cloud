@@ -9,6 +9,8 @@ using System.Security.Principal;
 using System.Text;
 using System.Threading;
 using System.Reflection;
+using System.Collections.Generic;
+using System.Threading.Tasks;
 
 [ComImport, Guid("43826D1E-E718-42EE-BC55-A1E261C37BFE"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
 public interface IShellItem
@@ -65,6 +67,12 @@ public sealed class YizukaThumbnailHandler : IInitializeWithItem, IThumbnailProv
     private static readonly string dataDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "YizukaCloud");
     private static readonly string[] endpoints = { "http://127.0.0.1:3924/", "https://17yizuka:8443/", "https://cloud.17yizuka.com/" };
     private static string currentEndpoint;
+    private static readonly object prefetchLock = new object();
+    private static readonly HashSet<string> prefetchedDirectories = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+    private static readonly string[] thumbnailExtensions = { ".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp", ".tif", ".tiff", ".heic", ".mp4", ".mov", ".mkv", ".avi", ".webm" };
+    private static readonly object credentialsLock = new object();
+    private static string cachedUser;
+    private static string cachedPassword;
 
     public int Initialize(IShellItem item, uint mode)
     {
@@ -101,6 +109,7 @@ public sealed class YizukaThumbnailHandler : IInitializeWithItem, IThumbnailProv
         {
             if (string.IsNullOrEmpty(relativePath)) return unchecked((int)0x80070057);
             byte[] image = ReadThumbnail(relativePath, cacheVersion);
+            QueueDirectoryPrefetch(relativePath);
             using (var source = Image.FromStream(new MemoryStream(image)))
             {
                 int side = (int)Math.Min(Math.Max(width, 1), 1024);
@@ -128,7 +137,66 @@ public sealed class YizukaThumbnailHandler : IInitializeWithItem, IThumbnailProv
         }
     }
 
-    private static byte[] ReadThumbnail(string relativePath, string version)
+    private static void QueueDirectoryPrefetch(string path)
+    {
+        string directory = Path.GetDirectoryName(path.Replace('/', Path.DirectorySeparatorChar)) ?? "";
+        lock (prefetchLock)
+        {
+            if (!prefetchedDirectories.Add(directory)) return;
+        }
+        Interlocked.Increment(ref ActiveCalls);
+        ThreadPool.QueueUserWorkItem(_ =>
+        {
+            try { PrefetchDirectory(directory); }
+            catch { /* A failed batch must never prevent normal Explorer thumbnails. */ }
+            finally
+            {
+                Interlocked.Exchange(ref LastActivityTicks, DateTime.UtcNow.Ticks);
+                Interlocked.Decrement(ref ActiveCalls);
+            }
+        });
+    }
+
+    internal static int PrefetchDirectory(string relativeDirectory)
+    {
+        string directory = Path.GetFullPath(Path.Combine(root, relativeDirectory));
+        if (!directory.Equals(root, StringComparison.OrdinalIgnoreCase) &&
+            !directory.StartsWith(root + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+            throw new ArgumentException("Directory is outside the cloud root.");
+        if (!Directory.Exists(directory)) return 0;
+        var candidates = new List<FileInfo>();
+        foreach (string path in Directory.EnumerateFiles(directory))
+        {
+            if (Array.IndexOf(thumbnailExtensions, Path.GetExtension(path).ToLowerInvariant()) < 0) continue;
+            var file = new FileInfo(path);
+            string relativePath = RelativePathFor(relativeDirectory, file.Name);
+            string version = file.Length + ":" + file.LastWriteTimeUtc.Ticks;
+            if (!File.Exists(CacheFileFor(relativePath, version))) candidates.Add(file);
+        }
+        if (candidates.Count == 0) return 0;
+        ServicePointManager.DefaultConnectionLimit = Math.Max(ServicePointManager.DefaultConnectionLimit, 8);
+        int completed = 0;
+        Parallel.ForEach(candidates, new ParallelOptions { MaxDegreeOfParallelism = 4 }, file =>
+        {
+            try
+            {
+                string relativePath = RelativePathFor(relativeDirectory, file.Name);
+                string version = file.Length + ":" + file.LastWriteTimeUtc.Ticks;
+                ReadThumbnail(relativePath, version);
+                Interlocked.Increment(ref completed);
+            }
+            catch { /* Individual unsupported or unavailable previews stay uncached. */ }
+        });
+        return completed;
+    }
+
+    private static string RelativePathFor(string directory, string fileName)
+    {
+        string prefix = directory.Replace('\\', '/').TrimEnd('/');
+        return prefix.Length == 0 ? fileName : prefix + "/" + fileName;
+    }
+
+    private static string CacheFileFor(string relativePath, string version)
     {
 #if YIZUKA_RELEASE
         var cacheDir = Path.Combine(dataDir, "ThumbnailCacheRelease");
@@ -138,14 +206,33 @@ public sealed class YizukaThumbnailHandler : IInitializeWithItem, IThumbnailProv
         Directory.CreateDirectory(cacheDir);
         string key;
         using (var sha = SHA256.Create()) key = BitConverter.ToString(sha.ComputeHash(Encoding.UTF8.GetBytes(relativePath + "\n" + version))).Replace("-", "");
-        var cacheFile = Path.Combine(cacheDir, key + ".jpg");
+        return Path.Combine(cacheDir, key + ".jpg");
+    }
+
+    private static void GetCredentials(out string user, out string password)
+    {
+        lock (credentialsLock)
+        {
+            if (cachedUser == null || cachedPassword == null)
+            {
+                var settings = File.ReadAllLines(Path.Combine(dataDir, "settings.ini"));
+                foreach (var line in settings)
+                    if (line.StartsWith("username=", StringComparison.OrdinalIgnoreCase)) cachedUser = line.Substring(9).Trim();
+                if (string.IsNullOrEmpty(cachedUser)) throw new InvalidOperationException("Cloud account is not authorized.");
+                cachedPassword = Encoding.UTF8.GetString(ProtectedData.Unprotect(File.ReadAllBytes(Path.Combine(dataDir, "password.dpapi")), null, DataProtectionScope.CurrentUser));
+            }
+            user = cachedUser;
+            password = cachedPassword;
+        }
+    }
+
+    private static byte[] ReadThumbnail(string relativePath, string version)
+    {
+        var cacheFile = CacheFileFor(relativePath, version);
         if (File.Exists(cacheFile)) return File.ReadAllBytes(cacheFile);
 
-        var settings = File.ReadAllLines(Path.Combine(dataDir, "settings.ini"));
-        string user = null;
-        foreach (var line in settings) if (line.StartsWith("username=", StringComparison.OrdinalIgnoreCase)) user = line.Substring(9).Trim();
-        if (string.IsNullOrEmpty(user)) throw new InvalidOperationException("Cloud account is not authorized.");
-        string password = Encoding.UTF8.GetString(ProtectedData.Unprotect(File.ReadAllBytes(Path.Combine(dataDir, "password.dpapi")), null, DataProtectionScope.CurrentUser));
+        string user, password;
+        GetCredentials(out user, out password);
         Exception lastError = null;
         var preferred = currentEndpoint;
         var order = new System.Collections.Generic.List<string>();
@@ -163,6 +250,7 @@ public sealed class YizukaThumbnailHandler : IInitializeWithItem, IThumbnailProv
                 var request = (HttpWebRequest)WebRequest.Create(url);
                 request.Headers[HttpRequestHeader.Authorization] = "Basic " + Convert.ToBase64String(Encoding.UTF8.GetBytes(user + ":" + password));
                 request.Timeout = endpoint == endpoints[2] ? 12000 : 2500;
+                request.ReadWriteTimeout = request.Timeout;
                 if (endpoint != endpoints[2]) request.Proxy = null;
                 using (var response = (HttpWebResponse)request.GetResponse())
                 {
@@ -174,7 +262,14 @@ public sealed class YizukaThumbnailHandler : IInitializeWithItem, IThumbnailProv
                         stream.CopyTo(memory);
                         var bytes = memory.ToArray();
                         if (bytes.Length > 2 * 1024 * 1024) throw new IOException("Thumbnail exceeded size limit.");
-                        File.WriteAllBytes(cacheFile, bytes);
+                        string temporaryFile = cacheFile + "." + Guid.NewGuid().ToString("N") + ".tmp";
+                        try
+                        {
+                            File.WriteAllBytes(temporaryFile, bytes);
+                            try { File.Move(temporaryFile, cacheFile); }
+                            catch (IOException) { if (!File.Exists(cacheFile)) throw; }
+                        }
+                        finally { if (File.Exists(temporaryFile)) File.Delete(temporaryFile); }
                         currentEndpoint = endpoint;
                         return bytes;
                     }
@@ -190,6 +285,34 @@ internal static class Program
 {
     private static int Main(string[] args)
     {
+        if (args.Length == 2 && args[0] == "--prefetch-test")
+        {
+            YizukaThumbnailHandler.PrefetchDirectory(args[1]);
+            return 0;
+        }
+        if (args.Length == 2 && args[0] == "--batch-render-test")
+        {
+            string configuredRoot = (string)typeof(YizukaThumbnailHandler).GetField("root", BindingFlags.Static | BindingFlags.NonPublic).GetValue(null);
+            string directory = Path.Combine(configuredRoot, args[1]);
+            var pathField = typeof(YizukaThumbnailHandler).GetField("relativePath", BindingFlags.Instance | BindingFlags.NonPublic);
+            var versionField = typeof(YizukaThumbnailHandler).GetField("cacheVersion", BindingFlags.Instance | BindingFlags.NonPublic);
+            int count = 0;
+            foreach (string path in Directory.EnumerateFiles(directory))
+            {
+                if (Array.IndexOf(new[] { ".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp", ".tif", ".tiff" }, Path.GetExtension(path).ToLowerInvariant()) < 0) continue;
+                var file = new FileInfo(path);
+                var handler = new YizukaThumbnailHandler();
+                pathField.SetValue(handler, Path.Combine(args[1], file.Name).Replace('\\', '/'));
+                versionField.SetValue(handler, file.Length + ":" + file.LastWriteTimeUtc.Ticks);
+                IntPtr bitmap;
+                uint alpha;
+                int result = handler.GetThumbnail(256, out bitmap, out alpha);
+                if (result < 0 || bitmap == IntPtr.Zero) return 2;
+                DeleteObject(bitmap);
+                count++;
+            }
+            return count > 0 ? 0 : 1;
+        }
         var registrar = new RegistrationServices();
         int cookie = registrar.RegisterTypeForComClients(typeof(YizukaThumbnailHandler), RegistrationClassContext.LocalServer, RegistrationConnectionType.MultipleUse);
         try
