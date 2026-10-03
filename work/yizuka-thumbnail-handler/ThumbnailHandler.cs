@@ -68,11 +68,18 @@ public sealed class YizukaThumbnailHandler : IInitializeWithItem, IThumbnailProv
     private static readonly string[] endpoints = { "http://127.0.0.1:3924/", "https://17yizuka:8443/", "https://cloud.17yizuka.com/" };
     private static string currentEndpoint;
     private static readonly object prefetchLock = new object();
-    private static readonly HashSet<string> prefetchedDirectories = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+    private static readonly Dictionary<string, DateTime> prefetchAttempts = new Dictionary<string, DateTime>(StringComparer.OrdinalIgnoreCase);
+    private const int WTS_E_EXTRACTIONPENDING = unchecked((int)0x8004B205);
+    private const uint SHCNE_UPDATEDIR = 0x00001000;
+    private const uint SHCNF_PATHW = 0x0005;
+    private const uint SHCNF_FLUSHNOWAIT = 0x2000;
     private static readonly string[] thumbnailExtensions = { ".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp", ".tif", ".tiff", ".heic", ".mp4", ".mov", ".mkv", ".avi", ".webm" };
     private static readonly object credentialsLock = new object();
     private static string cachedUser;
     private static string cachedPassword;
+
+    [DllImport("shell32.dll", CharSet = CharSet.Unicode)]
+    private static extern void SHChangeNotify(uint eventId, uint flags, string item1, IntPtr item2);
 
     public int Initialize(IShellItem item, uint mode)
     {
@@ -108,8 +115,12 @@ public sealed class YizukaThumbnailHandler : IInitializeWithItem, IThumbnailProv
         try
         {
             if (string.IsNullOrEmpty(relativePath)) return unchecked((int)0x80070057);
-            byte[] image = ReadThumbnail(relativePath, cacheVersion);
+            // Explorer invokes this synchronously. A network miss here can stall its shared
+            // thumbnail workers, including other cloud providers such as OneDrive.
+            string cacheFile = CacheFileFor(relativePath, cacheVersion);
             QueueDirectoryPrefetch(relativePath);
+            if (!File.Exists(cacheFile)) return WTS_E_EXTRACTIONPENDING;
+            byte[] image = File.ReadAllBytes(cacheFile);
             using (var source = Image.FromStream(new MemoryStream(image)))
             {
                 int side = (int)Math.Min(Math.Max(width, 1), 1024);
@@ -142,12 +153,23 @@ public sealed class YizukaThumbnailHandler : IInitializeWithItem, IThumbnailProv
         string directory = Path.GetDirectoryName(path.Replace('/', Path.DirectorySeparatorChar)) ?? "";
         lock (prefetchLock)
         {
-            if (!prefetchedDirectories.Add(directory)) return;
+            DateTime lastAttempt;
+            if (prefetchAttempts.TryGetValue(directory, out lastAttempt) &&
+                DateTime.UtcNow - lastAttempt < TimeSpan.FromMinutes(5)) return;
+            prefetchAttempts[directory] = DateTime.UtcNow;
         }
         Interlocked.Increment(ref ActiveCalls);
         ThreadPool.QueueUserWorkItem(_ =>
         {
-            try { PrefetchDirectory(directory); }
+            try
+            {
+                int completed = PrefetchDirectory(directory);
+                if (completed > 0)
+                {
+                    string localDirectory = Path.GetFullPath(Path.Combine(root, directory));
+                    SHChangeNotify(SHCNE_UPDATEDIR, SHCNF_PATHW | SHCNF_FLUSHNOWAIT, localDirectory, IntPtr.Zero);
+                }
+            }
             catch { /* A failed batch must never prevent normal Explorer thumbnails. */ }
             finally
             {
