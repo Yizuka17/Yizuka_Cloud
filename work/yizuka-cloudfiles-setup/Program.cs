@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.ComponentModel;
 using System.Drawing;
 using System.IO.Pipes;
 using System.Net;
@@ -6,11 +7,22 @@ using System.Net.Http.Headers;
 using System.Reflection;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
+using System.Security.Principal;
 using System.Text;
 using System.Windows.Forms;
 
 Application.EnableVisualStyles();
 Application.SetCompatibleTextRenderingDefault(false);
+if (args is ["--trust-certificate"])
+{
+    try { SetupForm.TrustEmbeddedCertificate(); }
+    catch (Exception error)
+    {
+        File.WriteAllText(Path.Combine(Path.GetTempPath(), SetupForm.LogName + ".certificate.log"), error.ToString());
+        Environment.ExitCode = 1;
+    }
+    return;
+}
 if (args is ["--install-default"])
 {
     try { await SetupForm.InstallDefaultAsync(); }
@@ -32,6 +44,7 @@ internal sealed class SetupForm : Form
     private const string PackageFamily = "Yizuka.CloudFiles_r2dfm4c685mge!App";
     private const string ControlPipe = "YizukaCloud.CfApi.Release.Control";
     private const string DefaultFolder = "Yizuka Cloud Files";
+    private const string CertificateResource = "Yizuka.CloudFiles.cer";
 #else
     internal const string LogName = "YizukaCloudFilesSetup-Test.log";
     private const string ConfigName = "cloudfiles-test.ini";
@@ -39,6 +52,7 @@ internal sealed class SetupForm : Form
     private const string PackageFamily = "Yizuka.CloudFiles.Test_r2dfm4c685mge!App";
     private const string ControlPipe = "YizukaCloud.CfApiTest4.Control";
     private const string DefaultFolder = "Yizuka Cloud Test";
+    private const string CertificateResource = "Yizuka.CloudFiles.Test.cer";
 #endif
     private readonly TextBox rootBox = new() { Width = 365 };
     private readonly TextBox userBox = new() { Width = 365 };
@@ -62,7 +76,7 @@ internal sealed class SetupForm : Form
         var title = new Label { Text = "Yizuka 云文件", Font = new Font("Microsoft YaHei UI", 16, FontStyle.Bold), AutoSize = true };
         panel.Controls.Add(title, 0, 0); panel.SetColumnSpan(title, 2);
 #if YIZUKA_RELEASE
-        var note = new Label { Text = "连接你的正式云盘。安装会在当前 Windows 用户账户中信任此安装包的自签名证书。", AutoSize = true, MaximumSize = new Size(450, 0) };
+        var note = new Label { Text = "连接你的正式云盘。安装时需要一次管理员授权，将内置签名证书加入本机“受信任人”证书库。", AutoSize = true, MaximumSize = new Size(450, 0) };
 #else
         var note = new Label { Text = "测试版只连接“CFAPI端到端测试”目录，不替换现有 Z:。安装会信任此测试包的签名证书（仅当前用户）。", AutoSize = true, MaximumSize = new Size(450, 0) };
 #endif
@@ -156,6 +170,55 @@ internal sealed class SetupForm : Form
         return output.ToArray();
     }
 
+    internal static void TrustEmbeddedCertificate()
+    {
+        var principal = new WindowsPrincipal(WindowsIdentity.GetCurrent());
+        if (!principal.IsInRole(WindowsBuiltInRole.Administrator))
+            throw new UnauthorizedAccessException("安装签名证书需要管理员授权。");
+        using var certificate = new X509Certificate2(Resource(CertificateResource));
+        using var executableSigner = new X509Certificate2(X509Certificate.CreateFromSignedFile(Application.ExecutablePath));
+        if (!certificate.Thumbprint.Equals(executableSigner.Thumbprint, StringComparison.OrdinalIgnoreCase))
+            throw new CryptographicException("安装程序签名与内置证书不一致。");
+        if (certificate.NotAfter <= DateTime.Now)
+            throw new CryptographicException("安装程序签名证书已过期。");
+        using var store = new X509Store(StoreName.TrustedPeople, StoreLocation.LocalMachine);
+        store.Open(OpenFlags.ReadWrite);
+        if (store.Certificates.Find(X509FindType.FindByThumbprint, certificate.Thumbprint, false).Count == 0)
+            store.Add(certificate);
+    }
+
+    private static async Task EnsureMachineTrustAsync()
+    {
+        using var certificate = new X509Certificate2(Resource(CertificateResource));
+        using (var store = new X509Store(StoreName.TrustedPeople, StoreLocation.LocalMachine))
+        {
+            store.Open(OpenFlags.ReadOnly);
+            if (store.Certificates.Find(X509FindType.FindByThumbprint, certificate.Thumbprint, false).Count > 0) return;
+        }
+        var processInfo = new ProcessStartInfo(Application.ExecutablePath)
+        {
+            UseShellExecute = true,
+            Verb = "runas",
+            WindowStyle = ProcessWindowStyle.Hidden
+        };
+        processInfo.ArgumentList.Add("--trust-certificate");
+        Process process;
+        try { process = Process.Start(processInfo) ?? throw new IOException("无法启动证书安装程序。"); }
+        catch (Win32Exception error) when (error.NativeErrorCode == 1223)
+        {
+            throw new IOException("需要在 Windows 管理员授权窗口中同意证书安装。", error);
+        }
+        using (process)
+        {
+            await process.WaitForExitAsync();
+            if (process.ExitCode != 0) throw new IOException("内置签名证书未能安装到本机受信任人证书库。");
+        }
+        using var check = new X509Store(StoreName.TrustedPeople, StoreLocation.LocalMachine);
+        check.Open(OpenFlags.ReadOnly);
+        if (check.Certificates.Find(X509FindType.FindByThumbprint, certificate.Thumbprint, false).Count == 0)
+            throw new IOException("管理员授权完成后，系统仍未信任内置签名证书。");
+    }
+
     private async Task InstallAsync()
     {
         installButton.Enabled = false;
@@ -184,13 +247,7 @@ internal sealed class SetupForm : Form
             if (username.Length == 0) throw new IOException("请输入账号。");
             await VerifyAccountAsync(username, password);
             report("安装签名证书与云文件组件…");
-            using (var certificate = new X509Certificate2(Resource("Yizuka.CloudFiles.Test.cer")))
-            using (var store = new X509Store(StoreName.TrustedPeople, StoreLocation.CurrentUser))
-            {
-                store.Open(OpenFlags.ReadWrite);
-                if (store.Certificates.Find(X509FindType.FindByThumbprint, certificate.Thumbprint, false).Count == 0)
-                    store.Add(certificate);
-            }
+            await EnsureMachineTrustAsync();
             var temp = Path.Combine(Path.GetTempPath(), "YizukaCloudSetup-" + Guid.NewGuid().ToString("N"));
             Directory.CreateDirectory(temp);
             var package = Path.Combine(temp, "cloudfiles.msix");

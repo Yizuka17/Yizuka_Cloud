@@ -20,7 +20,7 @@
   <ItemGroup Condition="'$(ReleaseChannel)' == 'Production'">
     <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="10.0.12" />
     <EmbeddedResource Include="..\yizuka-msix\Yizuka.CloudFiles.msix" LogicalName="Yizuka.CloudFiles.msix" />
-    <EmbeddedResource Include="..\yizuka-msix\Yizuka.CloudFiles.Test.cer" LogicalName="Yizuka.CloudFiles.Test.cer" />
+    <EmbeddedResource Include="..\yizuka-msix\Yizuka.CloudFiles.cer" LogicalName="Yizuka.CloudFiles.cer" />
   </ItemGroup>
   <ItemGroup>
     <Compile Include="..\yizuka-cfapi\CloudRootSafety.cs" Link="CloudRootSafety.cs" />
