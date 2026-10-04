@@ -21,3 +21,8 @@
 .grid .file-label{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;white-space:normal;overflow:hidden;overflow-wrap:anywhere;word-break:break-word;text-align:center;line-height:1.4;max-width:100%;min-height:2.8em}
 @media(max-width:1000px){.table-head,.file-row{grid-template-columns:minmax(120px,1fr) 72px 186px}}
 @media(max-width:650px){.table-head,.file-row{grid-template-columns:minmax(90px,1fr) auto;gap:6px}.file-row .file-size,.table-head span:nth-child(3){display:none}.file-name{gap:8px}.file-label{font-size:12px}.file-actions a,.file-actions button{font-size:11px;padding:6px 5px}.grid .file-actions{width:100%;justify-content:center}}
+.quick-links{display:flex;align-items:center;flex-wrap:wrap;gap:8px;padding:12px 0 2px}
+.quick-links a{display:inline-flex;align-items:center;justify-content:center;min-height:35px;padding:7px 12px;border:1px solid #dce4ef;border-radius:6px;background:#f5f9fe;font-size:12px;font-weight:600;white-space:nowrap}
+.quick-links a:hover{background:#e8f2ff}
+.quick-links small{font-size:11px;color:#798391}
+@media(max-width:650px){.quick-links{padding-top:12px;gap:7px}.quick-links a{flex:1;min-width:120px;padding:8px 7px}.quick-links small{width:100%;font-size:10px}}
