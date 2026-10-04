@@ -26,3 +26,7 @@
 .quick-links a:hover{background:#e8f2ff}
 .quick-links small{font-size:11px;color:#798391}
 @media(max-width:650px){.quick-links{padding-top:12px;gap:7px}.quick-links a{flex:1;min-width:120px;padding:8px 7px}.quick-links small{width:100%;font-size:10px}}
+.upload-list{max-height:150px;overflow:auto;border:1px solid var(--line);border-radius:7px;padding:8px 12px;background:#f8fafd}
+.upload-list div{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding:4px 0;font-size:12px}
+#uploadProgress{display:block;width:100%;height:14px;accent-color:var(--blue)}
+.upload-percent{text-align:right;margin:3px 0 0!important;font-variant-numeric:tabular-nums}
